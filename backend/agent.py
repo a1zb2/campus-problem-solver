@@ -1,11 +1,23 @@
 import os
+import re
 import json
+import logging
+from functools import lru_cache
+
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 load_dotenv()
+log = logging.getLogger("agent")
+
+# Both defaults are stable (non-preview) models. They're overridable via env vars
+# so a future model retirement is a config change, not a code change, and if the
+# primary fails (outage, rate limit, retired) we automatically retry on the fallback.
+PRIMARY_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite")
+LOW_CONFIDENCE = 0.5
 
 CATEGORIES = [
     "Bathroom & Hygiene",
@@ -36,68 +48,74 @@ Format:
 
 HUMAN_PROMPT = "Classify this student complaint: {complaint}"
 
+PROMPT = ChatPromptTemplate.from_messages([
+    ("system", SYSTEM_PROMPT),
+    ("human", HUMAN_PROMPT),
+])
+
+
+@lru_cache(maxsize=4)
+def _chain(model: str):
+    llm = ChatGoogleGenerativeAI(
+        model=model,
+        google_api_key=os.getenv("GOOGLE_API_KEY"),
+        temperature=0,
+        timeout=30,
+        max_retries=1,
+    )
+    return PROMPT | llm | StrOutputParser()
+
+
+def _parse(raw: str) -> dict:
+    """Pull the JSON object out of the model output, even if it added fences or chatter."""
+    match = re.search(r"\{.*\}", raw, re.DOTALL)
+    if not match:
+        raise ValueError(f"No JSON object in model output: {raw[:200]!r}")
+    result = json.loads(match.group(0))
+
+    category = result.get("category")
+    if category not in CATEGORIES:
+        category = "Other"
+    try:
+        confidence = max(0.0, min(1.0, float(result.get("confidence", 0.0))))
+    except (TypeError, ValueError):
+        confidence = 0.0
+
+    return {
+        "category": category,
+        "confidence": confidence,
+        "reasoning": str(result.get("reasoning") or "").strip() or "No reasoning provided.",
+        "fallback": confidence < LOW_CONFIDENCE,
+    }
+
+
 def classify_complaint(complaint: str) -> dict:
     """
     Classify a student complaint using Gemini.
-    Returns dict with category, confidence, reasoning, and department.
-    Falls back gracefully on errors.
+    Returns dict with category, confidence, reasoning and fallback flag.
+    Never raises — on any failure it returns a low-confidence "Other" result
+    so the complaint is still saved and sent for manual review.
     """
+    if not os.getenv("GOOGLE_API_KEY"):
+        log.error("GOOGLE_API_KEY is not set — skipping AI classification.")
+        return _fallback("AI classifier is not configured; sent for manual review.")
 
-    # --- Fallback result for low confidence or errors ---
-    fallback = {
-        "category": "Other",
-        "confidence": 0.0,
-        "reasoning": "Could not classify automatically.",
-        "routed_to": "General Administration",
-        "fallback": True,
-    }
+    for model in dict.fromkeys([PRIMARY_MODEL, FALLBACK_MODEL]):  # de-dupe, keep order
+        try:
+            raw = _chain(model).invoke({"complaint": complaint})
+            return _parse(raw)
+        except Exception:
+            log.exception("Classification with %s failed", model)
 
-    try:
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-3.1-flash-lite-preview",
-            google_api_key=os.getenv("GOOGLE_API_KEY"),
-            temperature=0,
-        )
+    return _fallback("AI classifier is temporarily unavailable; sent for manual review.")
 
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_PROMPT),
-            ("human", HUMAN_PROMPT),
-        ])
 
-        chain = prompt | llm | StrOutputParser()
-        raw_output = chain.invoke({"complaint": complaint})
-
-        # Strip any accidental markdown fences
-        clean = raw_output.strip().replace("```json", "").replace("```", "").strip()
-        result = json.loads(clean)
-
-        # Validate category is one of the 6
-        if result.get("category") not in CATEGORIES:
-            result["category"] = "Other"
-
-        # Clamp confidence between 0 and 1
-        result["confidence"] = max(0.0, min(1.0, float(result.get("confidence", 0.0))))
-
-        # Low confidence fallback
-        if result["confidence"] < 0.5:
-            result["fallback"] = True
-            result["routed_to"] = "General Administration"
-        else:
-            result["fallback"] = False
-            from database import CATEGORY_DEPARTMENT_MAP
-            result["routed_to"] = CATEGORY_DEPARTMENT_MAP.get(result["category"], "General Administration")
-
-        return result
-
-    except json.JSONDecodeError:
-        return fallback
-    except Exception as e:
-        fallback["reasoning"] = str(e)
-        return fallback
+def _fallback(reason: str) -> dict:
+    return {"category": "Other", "confidence": 0.0, "reasoning": reason, "fallback": True}
 
 
 if __name__ == "__main__":
-    # Quick test
+    logging.basicConfig(level=logging.INFO)
     test_complaints = [
         "Bathroom on 3rd floor has no water since yesterday",
         "Senior students are forcing us to do their laundry and threatening us",
@@ -112,6 +130,5 @@ if __name__ == "__main__":
         result = classify_complaint(complaint)
         print(f"  Category   : {result['category']}")
         print(f"  Confidence : {result['confidence']:.0%}")
-        print(f"  Routed to  : {result['routed_to']}")
         print(f"  Reasoning  : {result['reasoning']}")
-        print(f"  Fallback?  : {result.get('fallback', False)}")
+        print(f"  Fallback?  : {result['fallback']}")

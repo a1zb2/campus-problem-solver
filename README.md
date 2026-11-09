@@ -30,21 +30,19 @@ An AI-powered campus complaint management system. Students submit problems, Gemi
 campus-problem-solver/
 ├── backend/
 │   ├── main.py          # FastAPI — all API routes
-│   ├── agent.py         # Gemini classification agent
-│   ├── database.py      # SQLite setup + helper functions
+│   ├── agent.py         # Gemini classification agent (with model fallback)
+│   ├── auth.py          # Clerk token verification for admin routes
+│   ├── database.py      # SQLite (dev) / Postgres (prod) storage, incl. photos
 │   ├── router.py        # Department routing + notification logger
 │   ├── requirements.txt
 │   └── Procfile         # For Render deployment
 └── frontend/
     ├── src/
-    │   ├── pages/
-    │   │   ├── Home.jsx         # Landing page
-    │   │   ├── Submit.jsx       # Problem submission form
-    │   │   ├── Track.jsx        # Student tracking dashboard
-    │   │   ├── Admin.jsx        # Admin panel (protected)
-    │   │   └── Login.jsx        # Admin login page
+    │   ├── pages/               # Home, Submit, Track, Admin + 5 service pages
+    │   ├── components/          # Shared UI (buttons, headers, hero demo…)
+    │   ├── lib/                 # Services, categories, formatting helpers
     │   ├── api.js               # All API calls in one place
-    │   └── App.jsx              # Routing + navbar
+    │   └── App.jsx              # Routing, navbar, footer
     ├── package.json
     └── vite.config.js
 ```
@@ -53,7 +51,7 @@ campus-problem-solver/
 
 ## 🤖 AI Classification
 
-Powered by **Gemini 2.0 Flash** via LangChain. Complaints are classified into:
+Powered by **Gemini 3.8 Flash** (with Gemini 3.5 Flash-Lite as an automatic fallback) via LangChain. Complaints are classified into:
 
 | Category | Routed To |
 |---|---|
@@ -74,10 +72,10 @@ Powered by **Gemini 2.0 Flash** via LangChain. Complaints are classified into:
 
 | Layer | Technology |
 |---|---|
-| Frontend | React 18, Vite, Tailwind CSS |
+| Frontend | React 19, Vite, Tailwind CSS, Clerk, lucide-react |
 | Backend | FastAPI, Python |
-| Database | SQLite |
-| AI | Gemini 2.0 Flash via LangChain |
+| Database | SQLite (local) / Postgres (production) |
+| AI | Gemini 3.8 Flash via LangChain |
 | Frontend Deploy | Vercel |
 | Backend Deploy | Render |
 
@@ -96,8 +94,8 @@ Powered by **Gemini 2.0 Flash** via LangChain. Complaints are classified into:
 cd backend
 pip install -r requirements.txt
 
-# Create .env file
-echo "GOOGLE_API_KEY=your_key_here" > .env
+# Create .env (see .env.example for all options)
+cp .env.example .env   # then fill in GOOGLE_API_KEY
 
 # Run
 uvicorn main:app --reload
@@ -111,8 +109,8 @@ uvicorn main:app --reload
 cd frontend
 npm install
 
-# Create .env file
-echo "VITE_API_URL=http://localhost:8000" > .env
+# Create .env with your API URL and Clerk publishable key
+cp .env.example .env
 
 # Run
 npm run dev
@@ -127,11 +125,14 @@ npm run dev
 |---|---|---|
 | `GET` | `/` | Health check |
 | `POST` | `/problems` | Submit a complaint (multipart/form-data) |
-| `GET` | `/problems` | Get all problems (admin) |
+| `GET` | `/problems` | Get all problems — **admin** |
 | `GET` | `/problems/{id}` | Get single problem by tracking ID |
-| `PATCH` | `/problems/{id}` | Update status + resolution |
-| `DELETE` | `/problems/{id}` | Delete a problem |
-| `GET` | `/stats` | Dashboard stats (total, by status) |
+| `PATCH` | `/problems/{id}` | Update status + resolution — **admin** |
+| `DELETE` | `/problems/{id}` | Delete a problem — **admin** |
+| `GET` | `/stats` | Dashboard stats (total, by status) — **admin** |
+| `GET` | `/images/{id}` | Photo attached to a complaint |
+
+Admin routes require `Authorization: Bearer <Clerk session token>` once `CLERK_SECRET_KEY` is set (the frontend sends it automatically).
 
 ---
 
@@ -144,26 +145,31 @@ npm run dev
 3. Connect your repo, set **Root Directory** to `backend`
 4. **Build Command:** `pip install -r requirements.txt`
 5. **Start Command:** `uvicorn main:app --host 0.0.0.0 --port $PORT`
-6. Add environment variable: `GOOGLE_API_KEY=your_key`
+6. Add environment variables:
+   - `GOOGLE_API_KEY` — your Gemini key
+   - `DATABASE_URL` — a Postgres URL (e.g. a free [Neon](https://neon.tech) database). **Without it, Render's free tier wipes all complaints and photos every time the service restarts or sleeps.**
+   - `CLERK_SECRET_KEY` — from the Clerk dashboard → API keys. Locks the admin endpoints.
+   - `ALLOWED_ORIGINS` — your Vercel URL (optional)
 7. Deploy — copy your Render URL
 
 ### Frontend → Vercel
 
 1. Go to [vercel.com](https://vercel.com) → New Project
 2. Connect your repo, set **Root Directory** to `frontend`
-3. Add environment variable: `VITE_API_URL=https://your-render-url.onrender.com`
-4. Deploy
+3. Add environment variables: `VITE_API_URL=https://your-render-url.onrender.com` and `VITE_CLERK_PUBLISHABLE_KEY`
+4. Deploy (`frontend/vercel.json` makes deep links like `/track` work on refresh)
 
 ---
 
 ## 🔐 Admin Access
 
-Navigate to `/admin` on the frontend. Default password: `admin123`
+Sign-in is handled by [Clerk](https://clerk.com). To make someone an admin, open the user in the Clerk dashboard and set their **public metadata** to:
 
-To change it, update line 4 in `frontend/src/pages/Login.jsx`:
-```js
-const ADMIN_PASSWORD = "your_new_password";
+```json
+{ "role": "admin" }
 ```
+
+They'll then see **Dashboard** in the navbar. The backend checks the same role (when `CLERK_SECRET_KEY` is set), so the admin API can't be called by anyone else.
 
 ---
 

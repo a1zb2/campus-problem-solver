@@ -1,0 +1,95 @@
+import {
+  GraduationCap,
+  MessageSquareWarning,
+  SearchCheck,
+  Shirt,
+  ShoppingBag,
+  UtensilsCrossed,
+} from "lucide-react";
+
+// One source of truth for the campus services — used by the home page,
+// the navbar's Services menu and each service page's accent colour.
+export const services = [
+  {
+    id: "complaints",
+    title: "Complaints",
+    desc: "Describe the problem once. AI classifies it and routes it to the right department in seconds.",
+    short: "AI routes it to the right team.",
+    path: "/submit",
+    icon: MessageSquareWarning,
+    tag: "Instant Routing",
+    accent: "#6366f1",
+    soft: "#eef2ff",
+    ring: "rgba(99,102,241,0.16)",
+    live: true,
+  },
+  {
+    id: "canteen",
+    title: "Canteen",
+    desc: "Hot meals delivered to your block.",
+    short: "Hot meals delivered to your block.",
+    path: "/canteen",
+    icon: UtensilsCrossed,
+    tag: "Food & Drinks",
+    accent: "#f97316",
+    soft: "#fff7ed",
+    ring: "rgba(249,115,22,0.16)",
+  },
+  {
+    id: "laundry",
+    title: "Laundry",
+    desc: "Schedule a pickup in seconds.",
+    short: "Schedule a pickup in seconds.",
+    path: "/laundry",
+    icon: Shirt,
+    tag: "Room Service",
+    accent: "#0ea5e9",
+    soft: "#f0f9ff",
+    ring: "rgba(14,165,233,0.16)",
+  },
+  {
+    id: "lost-found",
+    title: "Lost & Found",
+    desc: "AI auto-matches lost items.",
+    short: "AI auto-matches lost items.",
+    path: "/lost-found",
+    icon: SearchCheck,
+    tag: "AI-Powered",
+    accent: "#8b5cf6",
+    soft: "#f5f3ff",
+    ring: "rgba(139,92,246,0.16)",
+  },
+  {
+    id: "doubts",
+    title: "Doubt Portal",
+    desc: "Get routed to the right senior.",
+    short: "Get routed to the right senior.",
+    path: "/doubts",
+    icon: GraduationCap,
+    tag: "Peer Learning",
+    accent: "#10b981",
+    soft: "#ecfdf5",
+    ring: "rgba(16,185,129,0.16)",
+  },
+  {
+    id: "marketplace",
+    title: "Marketplace",
+    desc: "Buy and sell campus items.",
+    short: "Buy and sell campus items.",
+    path: "/marketplace",
+    icon: ShoppingBag,
+    tag: "Buy & Sell",
+    accent: "#f43f5e",
+    soft: "#fff1f2",
+    ring: "rgba(244,63,94,0.16)",
+  },
+];
+
+export const serviceById = Object.fromEntries(services.map((s) => [s.id, s]));
+
+/** CSS variables that theme fields/buttons inside a service page. */
+export const accentVars = (s) => ({
+  "--accent": s.accent,
+  "--accent-soft": s.soft,
+  "--accent-ring": s.ring,
+});

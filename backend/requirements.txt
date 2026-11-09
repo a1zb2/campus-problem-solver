@@ -4,3 +4,6 @@ langchain-google-genai
 langchain-core
 python-dotenv
 python-multipart
+pyjwt[crypto]
+# Only needed when DATABASE_URL points at Postgres (recommended in production)
+psycopg[binary]

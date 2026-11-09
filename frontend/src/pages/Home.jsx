@@ -1,462 +1,341 @@
-import { useNavigate } from "react-router-dom";
-import { useState, useEffect, useRef } from "react";
-import { SignedIn, SignedOut, SignInButton } from "@clerk/clerk-react";
+import { useEffect, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { SignInButton, SignedIn, SignedOut } from "@clerk/clerk-react";
+import { ArrowRight, ArrowUpRight, Bot, CircleCheckBig, PenLine, Radar, Send, Sparkles } from "lucide-react";
 
-const services = [
-  {
-    icon: "🍽️",
-    title: "Canteen",
-    desc: "Hot meals delivered to your block.",
-    path: "/canteen",
-    accent: "#f97316",
-    glow: "rgba(249,115,22,0.15)",
-    tag: "Food & Drinks",
-  },
-  {
-    icon: "👕",
-    title: "Laundry",
-    desc: "Schedule a pickup in seconds.",
-    path: "/laundry",
-    accent: "#0ea5e9",
-    glow: "rgba(14,165,233,0.15)",
-    tag: "Room Service",
-  },
-  {
-    icon: "🔍",
-    title: "Lost & Found",
-    desc: "AI auto-matches lost items.",
-    path: "/lost-found",
-    accent: "#8b5cf6",
-    glow: "rgba(139,92,246,0.15)",
-    tag: "AI-Powered",
-  },
-  {
-    icon: "📚",
-    title: "Doubt Portal",
-    desc: "Get routed to the right senior.",
-    path: "/doubts",
-    accent: "#10b981",
-    glow: "rgba(16,185,129,0.15)",
-    tag: "Peer Learning",
-  },
-  {
-    icon: "🛒",
-    title: "Marketplace",
-    desc: "Buy and sell campus items.",
-    path: "/marketplace",
-    accent: "#f43f5e",
-    glow: "rgba(244,63,94,0.15)",
-    tag: "Buy & Sell",
-  },
-  {
-    icon: "📝",
-    title: "Complaints",
-    desc: "AI routes it to the right team.",
-    path: "/submit",
-    accent: "#6366f1",
-    glow: "rgba(99,102,241,0.15)",
-    tag: "Instant Routing",
-  },
-];
+import HeroDemo from "../components/HeroDemo";
+import Reveal from "../components/Reveal";
+import { CATEGORIES } from "../lib/complaints";
+import { serviceById, services } from "../lib/services";
 
 const steps = [
-  { icon: "📝", label: "Describe", sub: "Tell us what's wrong" },
-  { icon: "🤖", label: "AI Reads", sub: "Gemini classifies instantly" },
-  { icon: "📨", label: "Routed", sub: "Right dept, right exec" },
-  { icon: "🔍", label: "Track", sub: "Live status updates" },
-  { icon: "✅", label: "Resolved", sub: "Admin closes the loop" },
+  { icon: PenLine, label: "Describe", sub: "Tell us what's wrong, in your own words." },
+  { icon: Bot, label: "AI reads", sub: "Gemini classifies it instantly." },
+  { icon: Send, label: "Routed", sub: "Right department, right executive." },
+  { icon: Radar, label: "Track", sub: "Live status with your tracking ID." },
+  { icon: CircleCheckBig, label: "Resolved", sub: "Admin closes the loop with a response." },
 ];
 
-// Animated counter
+const heroPills = [
+  { label: "AI accuracy", value: "~90%" },
+  { label: "Services", value: "6 live" },
+  { label: "Powered by", value: "Gemini AI" },
+  { label: "Departments", value: "5 covered" },
+];
+
+// Animated counter with ease-out, started when scrolled into view.
 function Counter({ target, suffix = "" }) {
   const [count, setCount] = useState(0);
   const ref = useRef(null);
-  const started = useRef(false);
 
   useEffect(() => {
-    const observer = new IntersectionObserver(
+    let raf;
+    const io = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting && !started.current) {
-          started.current = true;
-          let start = 0;
-          const duration = 1200;
-          const step = (target / duration) * 16;
-          const timer = setInterval(() => {
-            start += step;
-            if (start >= target) {
-              setCount(target);
-              clearInterval(timer);
-            } else {
-              setCount(Math.floor(start));
-            }
-          }, 16);
-        }
+        if (!entry.isIntersecting) return;
+        io.disconnect();
+        const start = performance.now();
+        const tick = (now) => {
+          const p = Math.min(1, (now - start) / 1400);
+          setCount(Math.round(target * (1 - Math.pow(1 - p, 3))));
+          if (p < 1) raf = requestAnimationFrame(tick);
+        };
+        raf = requestAnimationFrame(tick);
       },
       { threshold: 0.5 }
     );
-    if (ref.current) observer.observe(ref.current);
-    return () => observer.disconnect();
+    if (ref.current) io.observe(ref.current);
+    return () => {
+      io.disconnect();
+      cancelAnimationFrame(raf);
+    };
   }, [target]);
 
   return (
-    <span ref={ref}>
+    <span ref={ref} className="tabular-nums">
       {count}
       {suffix}
     </span>
   );
 }
 
-export default function Home() {
+function PrimaryCta({ children, to = "/submit", size = "btn-lg" }) {
   const navigate = useNavigate();
-  const [visible, setVisible] = useState(false);
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-
-  useEffect(() => {
-    const t = setTimeout(() => setVisible(true), 50);
-    return () => clearTimeout(t);
-  }, []);
-
-  useEffect(() => {
-    const handleMouse = (e) => {
-      setMousePos({
-        x: (e.clientX / window.innerWidth - 0.5) * 20,
-        y: (e.clientY / window.innerHeight - 0.5) * 20,
-      });
-    };
-    window.addEventListener("mousemove", handleMouse);
-    return () => window.removeEventListener("mousemove", handleMouse);
-  }, []);
-
   return (
-    <div className="space-y-0 -mt-10 overflow-x-hidden">
+    <>
+      <SignedIn>
+        <button onClick={() => navigate(to)} className={`btn-primary ${size} group`}>
+          {children}
+          <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-0.5" />
+        </button>
+      </SignedIn>
+      <SignedOut>
+        <SignInButton mode="modal">
+          <button className={`btn-primary ${size} group`}>
+            Get started
+            <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-0.5" />
+          </button>
+        </SignInButton>
+      </SignedOut>
+    </>
+  );
+}
 
-      {/* ── HERO ─────────────────────────────────────────────────────── */}
-      <section className="relative min-h-[90vh] flex flex-col items-center justify-center text-center overflow-hidden px-6 py-20">
-
-        {/* Animated mesh background */}
-        <div className="absolute inset-0 -z-10">
-          <div
-            className="absolute inset-0"
-            style={{
-              background:
-                "radial-gradient(ellipse 80% 60% at 50% 0%, rgba(124,58,237,0.18) 0%, transparent 70%), radial-gradient(ellipse 60% 40% at 80% 80%, rgba(99,102,241,0.12) 0%, transparent 60%), radial-gradient(ellipse 50% 50% at 20% 60%, rgba(16,185,129,0.08) 0%, transparent 60%)",
-            }}
-          />
-          {/* Grid overlay */}
-          <div
-            className="absolute inset-0 opacity-[0.03]"
-            style={{
-              backgroundImage:
-                "linear-gradient(#6366f1 1px, transparent 1px), linear-gradient(90deg, #6366f1 1px, transparent 1px)",
-              backgroundSize: "60px 60px",
-            }}
-          />
-          {/* Floating orbs */}
-          <div
-            className="absolute top-1/4 left-1/4 w-72 h-72 rounded-full blur-3xl opacity-20 animate-pulse"
-            style={{ background: "radial-gradient(circle, #7c3aed, transparent)", animationDuration: "4s" }}
-          />
-          <div
-            className="absolute bottom-1/3 right-1/4 w-96 h-96 rounded-full blur-3xl opacity-10 animate-pulse"
-            style={{ background: "radial-gradient(circle, #6366f1, transparent)", animationDuration: "6s", animationDelay: "2s" }}
-          />
-        </div>
-
-        {/* Badge */}
-        <div
-          className={`inline-flex items-center gap-2 bg-white border border-violet-200 shadow-lg shadow-violet-100 text-violet-700 text-xs font-bold px-5 py-2 rounded-full mb-8 transition-all duration-700 ${
-            visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"
-          }`}
-          style={{ transitionDelay: "0ms" }}
-        >
-          <span className="w-2 h-2 bg-violet-500 rounded-full animate-ping" style={{ animationDuration: "2s" }} />
-          AI-Powered Campus Platform
-          <span className="bg-violet-100 text-violet-600 text-[10px] font-black px-2 py-0.5 rounded-full">LIVE</span>
-        </div>
-
-        {/* Headline */}
-        <h1
-          className={`text-6xl md:text-8xl font-black tracking-tight text-slate-900 leading-[1.0] mb-6 transition-all duration-700 ${
-            visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
-          }`}
-          style={{ transitionDelay: "100ms" }}
-        >
-          Your campus,
-          <br />
+function ServiceCard({ s, delay }) {
+  return (
+    <Reveal delay={delay} className="h-full">
+      <Link
+        to={s.path}
+        className="group relative flex h-full flex-col overflow-hidden rounded-3xl border border-slate-200/70 bg-white p-6 shadow-soft transition-all duration-300 hover:-translate-y-1 hover:shadow-lift"
+        style={{ "--accent": s.accent }}
+      >
+        <span
+          className="pointer-events-none absolute -right-10 -top-10 h-36 w-36 rounded-full opacity-0 blur-2xl transition-opacity duration-500 group-hover:opacity-100"
+          style={{ background: s.ring }}
+        />
+        <div className="relative mb-8 flex items-start justify-between">
           <span
-            className="relative inline-block"
-            style={{
-              background: "linear-gradient(135deg, #7c3aed 0%, #6366f1 40%, #0ea5e9 100%)",
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-              backgroundClip: "text",
-            }}
+            className="grid h-12 w-12 place-items-center rounded-2xl transition-transform duration-300 group-hover:-rotate-6 group-hover:scale-110"
+            style={{ background: s.soft, color: s.accent }}
           >
-            reimagined.
+            <s.icon className="h-6 w-6" strokeWidth={2.2} />
           </span>
-        </h1>
+          <span className="chip" style={{ background: s.soft, color: s.accent }}>
+            {s.tag}
+          </span>
+        </div>
+        <div className="relative mt-auto">
+          <h3 className="flex items-center gap-1.5 text-lg font-extrabold text-ink">
+            {s.title}
+            <ArrowUpRight className="h-4 w-4 -translate-x-1 text-slate-300 opacity-0 transition-all duration-300 group-hover:translate-x-0 group-hover:opacity-100" style={{ color: s.accent }} />
+          </h3>
+          <p className="mt-1 text-sm leading-relaxed text-slate-500">{s.desc}</p>
+        </div>
+      </Link>
+    </Reveal>
+  );
+}
 
-        {/* Subheadline */}
-        <p
-          className={`text-xl md:text-2xl text-slate-500 max-w-2xl mx-auto leading-relaxed mb-10 transition-all duration-700 ${
-            visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
-          }`}
-          style={{ transitionDelay: "200ms" }}
-        >
-          One platform for complaints, canteen orders, laundry, lost & found, and more —{" "}
-          <span className="text-slate-700 font-semibold">all routed by AI instantly.</span>
-        </p>
+function FeaturedComplaintCard() {
+  const s = serviceById.complaints;
+  return (
+    <Reveal className="h-full md:col-span-2 md:row-span-2">
+      <Link
+        to={s.path}
+        className="group relative flex h-full flex-col overflow-hidden rounded-3xl bg-gradient-to-br from-violet-600 via-indigo-600 to-indigo-700 p-7 text-white shadow-[0_30px_60px_-25px_rgba(79,70,229,0.7)] transition-all duration-300 hover:-translate-y-1 sm:p-9"
+      >
+        <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.15] [background-image:radial-gradient(#fff_1px,transparent_1px)] [background-size:18px_18px]" />
+        <div aria-hidden className="pointer-events-none absolute -right-24 -top-24 h-80 w-80 rounded-full bg-sky-400/30 blur-3xl" />
+        <div aria-hidden className="pointer-events-none absolute -bottom-32 -left-16 h-80 w-80 rounded-full bg-fuchsia-400/25 blur-3xl" />
 
-        {/* CTAs */}
-        <div
-          className={`flex flex-col sm:flex-row justify-center gap-3 transition-all duration-700 ${
-            visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
-          }`}
-          style={{ transitionDelay: "300ms" }}
-        >
-          <SignedIn>
-            <button
-              onClick={() => navigate("/submit")}
-              className="group relative overflow-hidden bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold px-8 py-4 rounded-2xl transition-all shadow-2xl shadow-violet-300 hover:shadow-violet-400 hover:-translate-y-1 text-lg"
-            >
-              <span className="relative z-10">File a Complaint →</span>
-              <div className="absolute inset-0 bg-gradient-to-r from-violet-700 to-indigo-700 opacity-0 group-hover:opacity-100 transition-opacity" />
-            </button>
-            <button
-              onClick={() => navigate("/track")}
-              className="bg-white border-2 border-slate-200 hover:border-violet-300 text-slate-700 font-bold px-8 py-4 rounded-2xl transition-all hover:shadow-lg hover:-translate-y-1 text-lg"
-            >
-              Track Status
-            </button>
-          </SignedIn>
-          <SignedOut>
-            <SignInButton mode="modal">
-              <button className="group relative overflow-hidden bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold px-8 py-4 rounded-2xl transition-all shadow-2xl shadow-violet-300 hover:shadow-violet-400 hover:-translate-y-1 text-lg">
-                Get Started →
-              </button>
-            </SignInButton>
-            <button
-              onClick={() => navigate("/track")}
-              className="bg-white border-2 border-slate-200 hover:border-violet-300 text-slate-700 font-bold px-8 py-4 rounded-2xl transition-all hover:shadow-lg hover:-translate-y-1 text-lg"
-            >
-              Track a Complaint
-            </button>
-          </SignedOut>
+        <div className="relative flex items-start justify-between">
+          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-white/15 ring-1 ring-inset ring-white/25 backdrop-blur">
+            <s.icon className="h-7 w-7" strokeWidth={2.2} />
+          </span>
+          <span className="chip bg-white/15 text-white ring-1 ring-inset ring-white/25">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-300" /> Live · {s.tag}
+          </span>
         </div>
 
-        {/* Floating stat pills */}
-        <div
-          className={`flex flex-wrap justify-center gap-3 mt-14 transition-all duration-700 ${
-            visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
-          }`}
-          style={{ transitionDelay: "400ms" }}
-        >
-          {[
-            { label: "AI Accuracy", value: "~90%", color: "bg-violet-50 border-violet-200 text-violet-700" },
-            { label: "Services", value: "6 live", color: "bg-indigo-50 border-indigo-200 text-indigo-700" },
-            { label: "Powered by", value: "Gemini AI", color: "bg-sky-50 border-sky-200 text-sky-700" },
-            { label: "Departments", value: "5 covered", color: "bg-emerald-50 border-emerald-200 text-emerald-700" },
-          ].map((pill, i) => (
-            <div
-              key={i}
-              className={`flex items-center gap-2 border rounded-full px-4 py-2 text-sm font-semibold ${pill.color} shadow-sm`}
-            >
-              <span className="text-xs font-normal opacity-70">{pill.label}</span>
-              <span className="font-black">{pill.value}</span>
-            </div>
+        <div className="relative mt-10 max-w-md">
+          <h3 className="text-3xl font-extrabold tracking-tight sm:text-4xl">File a complaint</h3>
+          <p className="mt-3 text-[15px] leading-relaxed text-indigo-100">{s.desc}</p>
+        </div>
+
+        <div className="relative mt-8 flex flex-wrap gap-2">
+          {CATEGORIES.map((c) => (
+            <span key={c.id} className="chip bg-white/10 py-1.5 text-white/90 ring-1 ring-inset ring-white/15 backdrop-blur">
+              <c.icon className="h-3.5 w-3.5" /> {c.label}
+            </span>
           ))}
         </div>
 
-        {/* Scroll hint */}
-        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 opacity-30 animate-bounce">
-          <div className="w-px h-8 bg-slate-400" />
-          <span className="text-xs text-slate-500 font-medium">scroll</span>
+        <div className="relative mt-auto pt-10">
+          <span className="inline-flex items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-bold text-indigo-700 shadow-lift transition-transform group-hover:translate-x-1">
+            Start now <ArrowRight className="h-4 w-4" />
+          </span>
+        </div>
+      </Link>
+    </Reveal>
+  );
+}
+
+export default function Home() {
+  const others = services.filter((s) => s.id !== "complaints");
+
+  return (
+    <div>
+      {/* ── HERO ─────────────────────────────────────────────────────── */}
+      <section className="relative px-4 pb-20 pt-14 sm:px-6 sm:pt-20">
+        <div aria-hidden className="pointer-events-none absolute inset-x-0 -top-28 bottom-0 -z-10 overflow-hidden">
+          <div className="absolute left-1/2 top-[-12rem] h-[34rem] w-[34rem] -translate-x-[85%] animate-aurora rounded-full bg-violet-400/25 blur-3xl" />
+          <div className="absolute left-1/2 top-[-8rem] h-[30rem] w-[30rem] -translate-x-[10%] animate-aurora rounded-full bg-sky-300/25 blur-3xl" style={{ animationDelay: "-6s" }} />
+          <div className="absolute left-1/2 top-[14rem] h-[22rem] w-[22rem] -translate-x-1/2 animate-aurora rounded-full bg-indigo-300/20 blur-3xl" style={{ animationDelay: "-12s" }} />
+        </div>
+
+        <div className="mx-auto max-w-5xl text-center">
+          <div className="animate-fade-up">
+            <span className="inline-flex items-center gap-2.5 rounded-full border border-violet-200/80 bg-white/80 py-1.5 pl-2 pr-2 text-xs font-bold text-violet-700 shadow-soft backdrop-blur">
+              <span className="relative grid h-5 w-5 place-items-center rounded-full bg-violet-100">
+                <Sparkles className="h-3 w-3" />
+              </span>
+              AI-Powered Campus Platform
+              <span className="flex items-center gap-1 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 px-2 py-0.5 text-[10px] font-extrabold tracking-wider text-white">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-300" />
+                LIVE
+              </span>
+            </span>
+          </div>
+
+          <h1
+            className="mt-8 animate-fade-up text-[3.2rem] font-extrabold leading-[0.98] tracking-[-0.035em] text-ink sm:text-7xl md:text-8xl lg:text-[7rem]"
+            style={{ animationDelay: "80ms" }}
+          >
+            Your campus<span className="-ml-[0.06em]">,</span>
+            <br />
+            <span className="relative inline-block bg-gradient-to-r from-violet-600 via-indigo-500 to-sky-500 bg-[length:200%_auto] bg-clip-text pb-2 text-transparent animate-gradient-x">
+              reimagined<span className="-ml-[0.04em]">.</span>
+            </span>
+          </h1>
+
+          <p
+            className="mx-auto mt-6 max-w-2xl animate-fade-up text-lg leading-relaxed text-slate-500 sm:text-xl"
+            style={{ animationDelay: "160ms" }}
+          >
+            One platform for complaints, canteen orders, laundry, lost &amp; found, and more —{" "}
+            <span className="font-semibold text-slate-800">all routed by AI instantly.</span>
+          </p>
+
+          <div className="mt-10 flex animate-fade-up flex-col justify-center gap-3 sm:flex-row" style={{ animationDelay: "240ms" }}>
+            <PrimaryCta>File a complaint</PrimaryCta>
+            <Link to="/track" className="btn-ghost btn-lg">
+              Track status
+            </Link>
+          </div>
+
+          <div className="mt-12 flex animate-fade-up justify-center" style={{ animationDelay: "320ms" }}>
+            <dl className="glass grid grid-cols-2 divide-slate-200/70 rounded-2xl shadow-soft sm:grid-cols-4 sm:divide-x">
+              {heroPills.map((p) => (
+                <div key={p.label} className="px-6 py-3 text-center">
+                  <dt className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{p.label}</dt>
+                  <dd className="mt-0.5 text-sm font-extrabold text-ink">{p.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        </div>
+
+        <div className="mx-auto mt-16 max-w-5xl animate-fade-up sm:mt-20" style={{ animationDelay: "420ms" }}>
+          <HeroDemo />
         </div>
       </section>
 
-      {/* ── SERVICES GRID ────────────────────────────────────────────── */}
-      <section className="py-24 px-6 relative">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-16">
-            <p className="text-xs font-black text-violet-600 uppercase tracking-[0.3em] mb-3">Student Portal</p>
-            <h2 className="text-5xl font-black text-slate-900 leading-tight">
-              Everything you need,
-              <br />
-              <span className="text-slate-400">right here.</span>
-            </h2>
-          </div>
+      {/* ── SERVICES BENTO ───────────────────────────────────────────── */}
+      <section className="px-4 py-20 sm:px-6">
+        <div className="mx-auto max-w-7xl">
+          <Reveal className="mb-12 flex flex-col items-start justify-between gap-6 md:flex-row md:items-end">
+            <div>
+              <p className="eyebrow mb-3 text-violet-600">
+                <span className="h-1.5 w-1.5 rounded-full bg-violet-600" /> Student portal
+              </p>
+              <h2 className="text-4xl font-extrabold leading-[1.05] tracking-tight text-ink sm:text-5xl">
+                Everything you need,
+                <br />
+                <span className="text-slate-400">right here.</span>
+              </h2>
+            </div>
+            <p className="max-w-sm text-[15px] leading-relaxed text-slate-500">
+              Six campus services in one place. Sign in once and get everything from room repairs to a cold coffee.
+            </p>
+          </Reveal>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {services.map((s, i) => (
-              <button
-                key={i}
-                onClick={() => navigate(s.path)}
-                className="group relative bg-white border border-slate-100 rounded-3xl p-7 text-left overflow-hidden transition-all duration-300 hover:-translate-y-2 hover:shadow-2xl"
-                style={{
-                  transitionDelay: `${i * 40}ms`,
-                  boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.boxShadow = `0 20px 60px ${s.glow}, 0 4px 20px rgba(0,0,0,0.08)`;
-                  e.currentTarget.style.borderColor = s.accent + "40";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.06)";
-                  e.currentTarget.style.borderColor = "#f1f5f9";
-                }}
-              >
-                {/* Glow blob */}
-                <div
-                  className="absolute top-0 right-0 w-32 h-32 rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500 -translate-y-1/2 translate-x-1/2"
-                  style={{ background: s.glow }}
-                />
-
-                <div className="relative z-10">
-                  <div className="flex items-start justify-between mb-5">
-                    <div
-                      className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shadow-sm transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3"
-                      style={{ background: s.glow, border: `1px solid ${s.accent}30` }}
-                    >
-                      {s.icon}
-                    </div>
-                    <span
-                      className="text-xs font-bold px-3 py-1 rounded-full"
-                      style={{ background: s.glow, color: s.accent }}
-                    >
-                      {s.tag}
-                    </span>
-                  </div>
-
-                  <h3 className="text-xl font-black text-slate-900 mb-2">{s.title}</h3>
-                  <p className="text-sm text-slate-500 leading-relaxed">{s.desc}</p>
-
-                  <div
-                    className="mt-5 flex items-center gap-1 text-xs font-black opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-0 group-hover:translate-x-1"
-                    style={{ color: s.accent }}
-                  >
-                    Open {s.title} →
-                  </div>
-                </div>
-              </button>
+          <div className="grid auto-rows-[minmax(220px,auto)] gap-4 md:grid-cols-3 md:gap-5">
+            <FeaturedComplaintCard />
+            {others.map((s, i) => (
+              <ServiceCard key={s.id} s={s} delay={i * 70} />
             ))}
           </div>
         </div>
       </section>
 
       {/* ── STATS BAND ───────────────────────────────────────────────── */}
-      <section className="py-16 px-6 relative overflow-hidden">
-        <div
-          className="absolute inset-0 -z-10"
-          style={{
-            background: "linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #1e1b4b 100%)",
-          }}
-        />
-        {/* Grid */}
-        <div
-          className="absolute inset-0 -z-10 opacity-10"
-          style={{
-            backgroundImage: "linear-gradient(rgba(255,255,255,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.3) 1px, transparent 1px)",
-            backgroundSize: "40px 40px",
-          }}
-        />
-
-        <div className="max-w-5xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
-          {[
-            { value: 90, suffix: "%", label: "AI Classification Accuracy" },
-            { value: 6, suffix: "+", label: "Campus Services" },
-            { value: 5, suffix: "", label: "Departments Connected" },
-            { value: 30, suffix: "s", label: "Avg. Routing Time" },
-          ].map((stat, i) => (
-            <div key={i} className="space-y-2">
-              <div className="text-4xl md:text-5xl font-black text-white">
-                <Counter target={stat.value} suffix={stat.suffix} />
+      <section className="px-4 py-8 sm:px-6">
+        <Reveal className="relative mx-auto max-w-7xl overflow-hidden rounded-[2rem] bg-ink px-6 py-14 sm:px-12">
+          <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.07] [background-image:linear-gradient(#fff_1px,transparent_1px),linear-gradient(90deg,#fff_1px,transparent_1px)] [background-size:44px_44px]" />
+          <div aria-hidden className="pointer-events-none absolute -left-20 -top-32 h-80 w-80 rounded-full bg-violet-600/40 blur-3xl" />
+          <div aria-hidden className="pointer-events-none absolute -bottom-32 right-0 h-80 w-96 rounded-full bg-sky-500/25 blur-3xl" />
+          <div className="relative grid grid-cols-2 gap-y-10 text-center md:grid-cols-4">
+            {[
+              { value: 90, suffix: "%", label: "AI classification accuracy" },
+              { value: 6, suffix: "+", label: "Campus services" },
+              { value: 5, suffix: "", label: "Departments connected" },
+              { value: 30, suffix: "s", label: "Avg. routing time" },
+            ].map((stat) => (
+              <div key={stat.label} className="md:border-l md:border-white/10 md:first:border-l-0">
+                <div className="bg-gradient-to-b from-white to-indigo-200 bg-clip-text text-5xl font-extrabold tracking-tight text-transparent md:text-6xl">
+                  <Counter target={stat.value} suffix={stat.suffix} />
+                </div>
+                <div className="mt-2 text-sm font-medium text-indigo-200/80">{stat.label}</div>
               </div>
-              <div className="text-indigo-300 text-sm font-medium">{stat.label}</div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </Reveal>
       </section>
 
       {/* ── HOW IT WORKS ─────────────────────────────────────────────── */}
-      <section className="py-24 px-6">
-        <div className="max-w-5xl mx-auto">
-          <div className="text-center mb-16">
-            <p className="text-xs font-black text-violet-600 uppercase tracking-[0.3em] mb-3">How It Works</p>
-            <h2 className="text-5xl font-black text-slate-900">
-              Complaint in{" "}
-              <span
-                style={{
-                  background: "linear-gradient(135deg, #7c3aed, #6366f1)",
-                  WebkitBackgroundClip: "text",
-                  WebkitTextFillColor: "transparent",
-                  backgroundClip: "text",
-                }}
-              >
-                30 seconds.
-              </span>
+      <section className="px-4 py-24 sm:px-6">
+        <div className="mx-auto max-w-6xl">
+          <Reveal className="mb-16 text-center">
+            <p className="eyebrow mb-3 justify-center text-violet-600">
+              <span className="h-1.5 w-1.5 rounded-full bg-violet-600" /> How it works
+            </p>
+            <h2 className="text-4xl font-extrabold tracking-tight text-ink sm:text-5xl">
+              Complaint in <span className="text-gradient">30 seconds.</span>
             </h2>
-          </div>
+          </Reveal>
 
-          {/* Steps */}
           <div className="relative">
-            {/* Connector line */}
-            <div className="absolute top-8 left-[10%] right-[10%] h-px bg-gradient-to-r from-transparent via-violet-200 to-transparent hidden md:block" />
-
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
+            <div aria-hidden className="absolute left-[10%] right-[10%] top-9 hidden h-px bg-gradient-to-r from-transparent via-violet-300 to-transparent md:block" />
+            <ol className="grid gap-4 md:grid-cols-5 md:gap-6">
               {steps.map((step, i) => (
-                <div key={i} className="flex flex-col items-center text-center gap-4 group">
-                  <div className="relative">
-                    <div className="w-16 h-16 bg-white border-2 border-slate-100 group-hover:border-violet-300 rounded-2xl flex items-center justify-center text-2xl shadow-sm group-hover:shadow-lg group-hover:shadow-violet-100 transition-all duration-300 group-hover:-translate-y-1">
-                      {step.icon}
-                    </div>
-                    <div className="absolute -top-2 -right-2 w-6 h-6 bg-violet-600 text-white text-xs font-black rounded-full flex items-center justify-center shadow-md">
+                <Reveal as="li" key={step.label} delay={i * 90} className="group relative flex items-start gap-4 rounded-3xl p-2 md:flex-col md:items-center md:text-center">
+                  <span className="relative shrink-0">
+                    <span className="grid h-[72px] w-[72px] place-items-center rounded-3xl border border-slate-200/80 bg-white text-violet-600 shadow-soft transition-all duration-300 group-hover:-translate-y-1 group-hover:border-violet-200 group-hover:shadow-glow">
+                      <step.icon className="h-7 w-7" strokeWidth={2} />
+                    </span>
+                    <span className="absolute -right-1.5 -top-1.5 grid h-6 w-6 place-items-center rounded-full bg-gradient-to-br from-violet-600 to-indigo-600 text-[11px] font-extrabold text-white shadow-md ring-2 ring-[#f7f7fb]">
                       {i + 1}
-                    </div>
+                    </span>
+                  </span>
+                  <div className="pt-2 md:pt-1">
+                    <div className="font-extrabold text-ink">{step.label}</div>
+                    <div className="mt-1 text-sm leading-snug text-slate-500">{step.sub}</div>
                   </div>
-                  <div>
-                    <div className="font-black text-slate-900 text-sm">{step.label}</div>
-                    <div className="text-xs text-slate-400 mt-0.5">{step.sub}</div>
-                  </div>
-                </div>
+                </Reveal>
               ))}
-            </div>
-          </div>
-
-          {/* CTA */}
-          <div className="text-center mt-16">
-            <SignedIn>
-              <button
-                onClick={() => navigate("/submit")}
-                className="inline-flex items-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold px-10 py-4 rounded-2xl shadow-xl shadow-violet-200 hover:shadow-violet-300 hover:-translate-y-1 transition-all text-lg"
-              >
-                Try It Now →
-              </button>
-            </SignedIn>
-            <SignedOut>
-              <SignInButton mode="modal">
-                <button className="inline-flex items-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold px-10 py-4 rounded-2xl shadow-xl shadow-violet-200 hover:shadow-violet-300 hover:-translate-y-1 transition-all text-lg">
-                  Get Started Free →
-                </button>
-              </SignInButton>
-            </SignedOut>
+            </ol>
           </div>
         </div>
       </section>
 
-      {/* ── FOOTER ───────────────────────────────────────────────────── */}
-      <footer className="border-t border-slate-100 py-10 px-6 text-center">
-        <div className="flex items-center justify-center gap-2 mb-3">
-          <div className="w-7 h-7 bg-gradient-to-br from-violet-600 to-indigo-600 rounded-lg flex items-center justify-center">
-            <span className="text-white text-xs font-black">U</span>
+      {/* ── FINAL CTA ────────────────────────────────────────────────── */}
+      <section className="px-4 sm:px-6">
+        <Reveal className="relative mx-auto max-w-5xl overflow-hidden rounded-[2rem] border border-violet-200/60 bg-gradient-to-br from-violet-50 via-white to-sky-50 px-6 py-16 text-center shadow-soft sm:px-12">
+          <div aria-hidden className="bg-dots mask-fade-b pointer-events-none absolute inset-0 opacity-60" />
+          <div className="relative">
+            <h2 className="mx-auto max-w-3xl text-3xl font-extrabold tracking-tight text-ink sm:text-5xl">
+              Something broken on campus?
+              <span className="block text-gradient">Let AI route it.</span>
+            </h2>
+            <p className="mx-auto mt-4 max-w-md text-slate-500">
+              Describe it once. We&apos;ll get it to the right desk and keep you posted until it&apos;s fixed.
+            </p>
+            <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+              <PrimaryCta>Try it now</PrimaryCta>
+            </div>
           </div>
-          <span className="font-black text-slate-900">
-            Uni<span className="text-violet-600">Sync</span>
-          </span>
-        </div>
-        <p className="text-xs text-slate-400">
-          Built for the AI/ML Hackathon · Powered by Gemini AI & Clerk
-        </p>
-      </footer>
+        </Reveal>
+      </section>
     </div>
   );
 }
