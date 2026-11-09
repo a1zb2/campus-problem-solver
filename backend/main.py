@@ -58,7 +58,8 @@ class UpdateStatusRequest(BaseModel):
 
 # ---------- Routes ----------
 
-@app.get("/")
+# HEAD too, so Render's health check and uptime monitors get a 200.
+@app.api_route("/", methods=["GET", "HEAD"])
 def root():
     return {"message": "Campus Problem Solver API is running."}
 
