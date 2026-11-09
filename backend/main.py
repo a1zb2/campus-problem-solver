@@ -1,42 +1,55 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
-from typing import Optional
-import sys
 import os
-import shutil
-import uuid
+import sys
+import logging
+from typing import Optional
 
-sys.path.append(os.path.dirname(__file__))
+from dotenv import load_dotenv
 
-from database import (
-    insert_problem,
-    get_problem_by_id,
-    get_all_problems,
-    update_status,
-    get_stats,
-    get_connection,
-)
+load_dotenv()
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Response, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+import database as db
 from agent import classify_complaint
-from router import route_problem
+from auth import require_admin
+from router import get_executive_for_department, log_notification, resolve_department
 
 app = FastAPI(title="Campus Problem Solver API")
 
-# Serve uploaded images as static files
-UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
-
+# Comma-separated list, e.g. "https://campus-problem-solver.vercel.app,http://localhost:5173"
+allowed_origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=allowed_origins,
+    allow_credentials=False,  # we use bearer tokens, not cookies
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ---------- Request / Response Models ----------
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
+MIN_DESCRIPTION, MAX_DESCRIPTION = 10, 2000
+
+# Identify images by their magic bytes rather than trusting the filename / client header.
+IMAGE_SIGNATURES = [
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+]
+
+
+def sniff_image_type(data: bytes) -> Optional[str]:
+    for sig, mime in IMAGE_SIGNATURES:
+        if data.startswith(sig):
+            return mime
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
 
 class UpdateStatusRequest(BaseModel):
     status: str
@@ -50,93 +63,107 @@ def root():
     return {"message": "Campus Problem Solver API is running."}
 
 
+# Plain `def` (not async) so FastAPI runs it in a worker thread — the Gemini
+# call is blocking and would otherwise stall every other request.
 @app.post("/problems")
-async def submit_problem(
+def submit_problem(
     description: str = Form(...),
     image: Optional[UploadFile] = File(None),
 ):
     description = description.strip()
-
-    if not description:
-        raise HTTPException(status_code=400, detail="Description cannot be empty.")
-    if len(description) < 10:
+    if len(description) < MIN_DESCRIPTION:
         raise HTTPException(status_code=400, detail="Description is too short.")
+    if len(description) > MAX_DESCRIPTION:
+        raise HTTPException(status_code=400, detail=f"Description is too long (max {MAX_DESCRIPTION} characters).")
 
-    # Save image if uploaded
-    image_url = None
+    image_payload = None
     if image and image.filename:
-        ext = os.path.splitext(image.filename)[1]
-        filename = f"{uuid.uuid4().hex}{ext}"
-        filepath = os.path.join(UPLOAD_DIR, filename)
-        with open(filepath, "wb") as f:
-            shutil.copyfileobj(image.file, f)
-        image_url = f"/uploads/{filename}"
+        data = image.file.read(MAX_IMAGE_BYTES + 1)
+        if len(data) > MAX_IMAGE_BYTES:
+            raise HTTPException(status_code=400, detail="Photo is too large (max 5 MB).")
+        mime = sniff_image_type(data)
+        if not mime:
+            raise HTTPException(status_code=400, detail="Photo must be a JPG, PNG, WEBP or GIF image.")
+        image_payload = (data, mime)
 
-    # Save to DB
-    tracking_id = insert_problem(description, image_url)
-
-    # Classify with Gemini
     classification = classify_complaint(description)
+    department = resolve_department(classification)
+    executive = get_executive_for_department(department)
 
-    # Route to department
-    routing = route_problem(tracking_id, classification)
+    problem = db.insert_problem(
+        description,
+        category=classification["category"],
+        confidence=classification["confidence"],
+        department=department,
+        image=image_payload,
+    )
+    log_notification(problem, executive)
 
     return {
-        "tracking_id": tracking_id,
-        "category": routing["category"],
-        "confidence": routing["confidence"],
-        "department": routing["department"],
-        "reasoning": routing["reasoning"],
-        "fallback": routing["fallback"],
-        "executive": routing["executive"],
-        "image_url": image_url,
+        "tracking_id": problem["id"],
+        "category": problem["category"],
+        "confidence": problem["confidence"],
+        "department": department,
+        "reasoning": classification["reasoning"],
+        "fallback": classification["fallback"],
+        "executive": executive,
+        "image_url": problem["image_path"],
     }
 
 
-@app.get("/problems")
+@app.get("/problems", dependencies=[Depends(require_admin)])
 def get_problems(status: Optional[str] = None, department: Optional[str] = None):
-    problems = get_all_problems()
-    if status and status != "All":
-        problems = [p for p in problems if p["status"] == status]
-    if department and department != "All":
-        problems = [p for p in problems if p.get("department") == department]
-    return problems
+    return db.get_all_problems(
+        status=None if status in (None, "", "All") else status,
+        department=None if department in (None, "", "All") else department,
+    )
 
 
 @app.get("/problems/{tracking_id}")
 def get_problem(tracking_id: str):
-    problem = get_problem_by_id(tracking_id.upper())
+    problem = db.get_problem_by_id(tracking_id.strip().upper())
     if not problem:
         raise HTTPException(status_code=404, detail="Problem not found.")
     return problem
 
 
-@app.patch("/problems/{tracking_id}")
+@app.patch("/problems/{tracking_id}", dependencies=[Depends(require_admin)])
 def update_problem_status(tracking_id: str, body: UpdateStatusRequest):
-    problem = get_problem_by_id(tracking_id.upper())
-    if not problem:
+    tracking_id = tracking_id.strip().upper()
+    if not db.get_problem_by_id(tracking_id):
         raise HTTPException(status_code=404, detail="Problem not found.")
+    if body.status not in db.VALID_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Status must be one of {db.VALID_STATUSES}")
 
-    valid_statuses = ["Submitted", "In Progress", "Resolved"]
-    if body.status not in valid_statuses:
-        raise HTTPException(status_code=400, detail=f"Status must be one of {valid_statuses}")
-
-    update_status(tracking_id.upper(), body.status, body.resolution)
+    resolution = (body.resolution or "").strip() or None
+    db.update_status(tracking_id, body.status, resolution)
     return {"message": "Updated successfully."}
 
 
-@app.delete("/problems/{tracking_id}")
+@app.delete("/problems/{tracking_id}", dependencies=[Depends(require_admin)])
 def delete_problem(tracking_id: str):
-    problem = get_problem_by_id(tracking_id.upper())
-    if not problem:
+    tracking_id = tracking_id.strip().upper()
+    if not db.get_problem_by_id(tracking_id):
         raise HTTPException(status_code=404, detail="Problem not found.")
-    conn = get_connection()
-    conn.execute("DELETE FROM problems WHERE id = ?", (tracking_id.upper(),))
-    conn.commit()
-    conn.close()
+    db.delete_problem(tracking_id)
     return {"message": "Deleted successfully."}
 
 
-@app.get("/stats")
+@app.get("/stats", dependencies=[Depends(require_admin)])
 def get_dashboard_stats():
-    return get_stats()
+    return db.get_stats()
+
+
+@app.get("/images/{image_id}")
+def get_image(image_id: str):
+    image = db.get_image(image_id)
+    if not image:
+        raise HTTPException(status_code=404, detail="Image not found.")
+    return Response(
+        content=bytes(image["data"]),
+        media_type=image["content_type"],
+        headers={
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )

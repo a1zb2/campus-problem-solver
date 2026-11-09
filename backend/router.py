@@ -1,6 +1,9 @@
 import os
-from datetime import datetime
-from database import CATEGORY_DEPARTMENT_MAP, update_classification, get_problem_by_id
+import logging
+
+from database import CATEGORY_DEPARTMENT_MAP, FALLBACK_DEPARTMENT, now_iso
+
+log = logging.getLogger("router")
 
 DEPARTMENT_EXECUTIVES = {
     "Maintenance Department": {
@@ -30,62 +33,37 @@ DEPARTMENT_EXECUTIVES = {
     },
 }
 
-LOG_FILE = "notifications.log"
+LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "notifications.log")
 
 
-def log_notification(tracking_id: str, department: str, executive: dict, problem: dict):
-    """Log a routing notification to a file (simulates email)."""
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_entry = f"""
+def get_executive_for_department(department: str) -> dict:
+    return DEPARTMENT_EXECUTIVES.get(department, DEPARTMENT_EXECUTIVES[FALLBACK_DEPARTMENT])
+
+
+def resolve_department(classification: dict) -> str:
+    """Low-confidence results go to General Administration for a human to triage."""
+    if classification.get("fallback"):
+        return FALLBACK_DEPARTMENT
+    return CATEGORY_DEPARTMENT_MAP.get(classification.get("category"), FALLBACK_DEPARTMENT)
+
+
+def log_notification(problem: dict, executive: dict):
+    """Log a routing notification (simulates emailing the department)."""
+    entry = f"""
 ==========================================
-[{now}] NEW PROBLEM ROUTED
+[{now_iso()}] NEW PROBLEM ROUTED
 ==========================================
-Tracking ID  : {tracking_id}
+Tracking ID  : {problem.get('id')}
 Category     : {problem.get('category')}
-Confidence   : {problem.get('confidence', 0):.0%}
-Department   : {department}
+Confidence   : {problem.get('confidence') or 0:.0%}
+Department   : {problem.get('department')}
 Assigned To  : {executive['name']} ({executive['email']})
 Description  : {problem.get('description')}
 ==========================================
 """
-    with open(LOG_FILE, "a") as f:
-        f.write(log_entry)
-
-    print(log_entry)  # also print to console during dev
-
-
-def route_problem(tracking_id: str, classification: dict) -> dict:
-    """
-    Takes a tracking ID and Gemini classification result,
-    updates the DB, logs the notification, and returns routing info.
-    """
-    category = classification.get("category", "Other")
-    confidence = classification.get("confidence", 0.0)
-
-    # Save classification to DB
-    update_classification(tracking_id, category, confidence)
-
-    # Get department and executive
-    department = CATEGORY_DEPARTMENT_MAP.get(category, "General Administration")
-    executive = DEPARTMENT_EXECUTIVES.get(department, DEPARTMENT_EXECUTIVES["General Administration"])
-
-    # Fetch updated problem for the log
-    problem = get_problem_by_id(tracking_id)
-
-    # Log notification (simulates sending email)
-    log_notification(tracking_id, department, executive, problem)
-
-    return {
-        "tracking_id": tracking_id,
-        "category": category,
-        "confidence": confidence,
-        "department": department,
-        "executive": executive,
-        "reasoning": classification.get("reasoning", ""),
-        "fallback": classification.get("fallback", False),
-    }
-
-
-def get_executive_for_department(department: str) -> dict:
-    """Helper to get executive info for a department."""
-    return DEPARTMENT_EXECUTIVES.get(department, DEPARTMENT_EXECUTIVES["General Administration"])
+    log.info(entry)
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(entry)
+    except OSError:
+        log.warning("Could not write to %s", LOG_FILE)
