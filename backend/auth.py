@@ -26,12 +26,15 @@ CLERK_SECRET_KEY = os.getenv("CLERK_SECRET_KEY", "").strip()
 CLERK_API = "https://api.clerk.com/v1"
 ROLE_CACHE_SECONDS = 60
 
+# Clerk's API sits behind Cloudflare, which rejects Python's default
+# "Python-urllib/x.y" user agent (error 1010), so always send our own.
+CLERK_HEADERS = {
+    "Authorization": f"Bearer {CLERK_SECRET_KEY}",
+    "User-Agent": "campus-problem-solver-api/1.0",
+}
+
 _jwks = (
-    PyJWKClient(
-        f"{CLERK_API}/jwks",
-        headers={"Authorization": f"Bearer {CLERK_SECRET_KEY}"},
-        cache_keys=True,
-    )
+    PyJWKClient(f"{CLERK_API}/jwks", headers=CLERK_HEADERS, cache_keys=True)
     if CLERK_SECRET_KEY
     else None
 )
@@ -46,10 +49,7 @@ def _is_admin(user_id: str) -> bool:
     if cached and time.time() - cached[0] < ROLE_CACHE_SECONDS:
         return cached[1]
 
-    req = urllib.request.Request(
-        f"{CLERK_API}/users/{user_id}",
-        headers={"Authorization": f"Bearer {CLERK_SECRET_KEY}"},
-    )
+    req = urllib.request.Request(f"{CLERK_API}/users/{user_id}", headers=CLERK_HEADERS)
     with urllib.request.urlopen(req, timeout=10) as resp:
         user = json.load(resp)
 
@@ -69,8 +69,19 @@ def require_admin(authorization: str | None = Header(default=None)):
 
     try:
         key = _jwks.get_signing_key_from_jwt(token).key
+    except jwt.PyJWKClientConnectionError:
+        # Couldn't reach Clerk (network / bad secret key) — not the user's fault.
+        log.exception("Could not fetch Clerk signing keys")
+        raise HTTPException(status_code=503, detail="Could not verify admin access right now.")
+    except jwt.PyJWTError as e:
+        # e.g. token signed by a different Clerk app than CLERK_SECRET_KEY belongs to
+        log.warning("Rejected admin token (signing key): %s", e)
+        raise HTTPException(status_code=401, detail="Your session has expired. Please sign in again.")
+
+    try:
         claims = jwt.decode(token, key, algorithms=["RS256"], leeway=10)
-    except jwt.PyJWTError:
+    except jwt.PyJWTError as e:
+        log.warning("Rejected admin token: %s", e)
         raise HTTPException(status_code=401, detail="Your session has expired. Please sign in again.")
 
     user_id = claims.get("sub")
